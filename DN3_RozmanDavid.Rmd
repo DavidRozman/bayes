@@ -1,0 +1,276 @@
+---
+title: 'Bayesova Statistika - Seminarska naloga'
+author: "David Rozman"
+fontsize: 12pt
+output:
+  pdf_document:
+    number_sections: yes
+editor_options:
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.width = 8, fig.height = 5, out.width = "0.8\\textwidth")
+require(latex2exp)
+```
+
+# Naloga 1
+
+Pri prvi nalogi bomo primerjali frekventistični in Bayesov pristop pri multipli linearni regresiji v treh različnih scenarijih: normalno porazdeljena napaka z veliko varianco, normalno porazdeljena napaka z majhno varianco in asimetrično porazdeljena napaka. V vseh treh primerih bo model oblike
+
+$$Y=20+4X_1+10X_2-0.2X_3-X_4+\mathcal{E},$$
+kjer je $X_1\sim U(10,30), X_2\sim N(80,10), X_3\sim N(10,3)$ in $X_4\sim N(5,2)$. Vsakič bomo simulirali še dodatno spremenljivko $X_5\sim U(0,50)$, ki v modelu nima efekta.
+
+## Normalno porazdeljena napaka z veliko varianco
+
+V tem primeru sem izbral varianco $50$, torej $\mathcal{E}\sim N(0,50)$. Na eni ponovitvi simulacije sem najprej preveril, če so privzeti parametri funkcije bayesx primerni. Ti so nastavljeni na: Število iteracij: 1200, Burn-in: 2000
+
+```{r}
+library(R2BayesX)
+
+n <- 100
+x1 <- runif(n,10,30)
+x2 <- rnorm(n,80,10)
+x3 <- rnorm(n,10,3)
+x4 <- rnorm(n,5,2)
+x5 <- runif(n,0,50)
+y <- 3+4*x1+10*x2-0.2*x3-x4+rnorm(n,0,50)
+
+fit.bayesx <- bayesx(y ~ x1+x2+x3+x4+x5, family = "gaussian", method = "MCMC")
+summary(fit.bayesx)
+
+par(mfrow = c(2, 2))
+bayes2 <- attr(fit.bayesx$fixed.effects,"sample")[,3]
+bayes3 <- attr(fit.bayesx$fixed.effects,"sample")[,4]
+plot(bayes2,type="l",main="b2")
+hist(bayes2,prob=T,main="b2")
+lines(density(bayes2),col="red",lwd=2)
+plot(bayes3,type="l",main="b3")
+hist(bayes3,prob=T,main="b3")
+lines(density(bayes3),col="red",lwd=2)
+```
+
+Grafa verig in histograma za parametra $\beta_2$ in $\beta_3$ imata želeno obliko, zato spreminjanje začetnih parametrov ni potrebno.
+
+Sestavil sem funkcijo NormalnaNapaka, ki sprejme število iteracij ter varianco ter naredi, želeno število simulacij, kjer je napaka porazdeljena normalno z želeno varianco. Kot rezultat vrne matriko, kjer v vsaki vrstici najdemo povprečen rezultat simulacije za posamezen regresijski koeficient: Najprej ocena regresijskega koeficienta, nato standarna napaka ter koren srednje kvadratne napake. Prvi trije stolpci so rezultati pri uporabi frekventističnega pristopa s funkcijo lm, drugi trije pa pri uporabi bayesovega pristopa s funkcijo bayesx.
+
+```{r}
+NormalnaNapaka <- function(iteracije,varianca) {
+
+b0lm <- c()    
+b1lm <- c()
+b2lm <- c()
+b3lm <- c()
+b4lm <- c()
+b5lm <- c()
+sn0 <- c()
+sn1 <- c()
+sn2 <- c()
+sn3 <- c()
+sn4 <- c()
+sn5 <- c()
+skn0 <- c()
+skn1 <- c()
+skn2 <- c()
+skn3 <- c()
+skn4 <- c()
+skn5 <- c()
+
+b0bayes <- c()
+b1bayes <- c()
+b2bayes <- c()
+b3bayes <- c()
+b4bayes <- c()
+b5bayes <- c()
+odklon0 <- c()
+odklon1 <- c()
+odklon2 <- c()
+odklon3 <- c()
+odklon4 <- c()
+odklon5 <- c()
+skn0b <- c()
+skn1b <- c()
+skn2b <- c()
+skn3b <- c()
+skn4b <- c()
+skn5b <- c()
+
+
+for (i in 1:iteracije) {
+  n <- 100
+  x1 <- runif(n,10,30)
+  x2 <- rnorm(n,80,10)
+  x3 <- rnorm(n,10,3)
+  x4 <- rnorm(n,5,2)
+  x5 <- runif(n,0,50)
+  y <- 20+4*x1+10*x2-0.2*x3-x4+rnorm(n,0,varianca)
+  
+  fit.lm <- lm(y~x1+x2+x3+x4+x5)
+  b0lm <- c(b0lm,summary(fit.lm)$coefficients[1,1])
+  b1lm <- c(b1lm,summary(fit.lm)$coefficients[2,1])
+  b2lm <- c(b2lm,summary(fit.lm)$coefficients[3,1])
+  b3lm <- c(b3lm,summary(fit.lm)$coefficients[4,1])
+  b4lm <- c(b4lm,summary(fit.lm)$coefficients[5,1])
+  b5lm <- c(b5lm,summary(fit.lm)$coefficients[6,1])
+  sn0 <- c(sn0,summary(fit.lm)$coefficients[1,2])
+  sn1 <- c(sn1,summary(fit.lm)$coefficients[2,2])
+  sn2 <- c(sn2,summary(fit.lm)$coefficients[3,2])
+  sn3 <- c(sn3,summary(fit.lm)$coefficients[4,2])
+  sn4 <- c(sn4,summary(fit.lm)$coefficients[5,2])
+  sn5 <- c(sn5,summary(fit.lm)$coefficients[6,2])
+  skn0 <- c(skn0,(20-summary(fit.lm)$coefficients[1,1])^2)
+  skn1 <- c(skn1,(4-summary(fit.lm)$coefficients[2,1])^2)
+  skn2 <- c(skn2,(10-summary(fit.lm)$coefficients[3,1])^2)
+  skn3 <- c(skn3,(-0.2-summary(fit.lm)$coefficients[4,1])^2)
+  skn4 <- c(skn4,(0-summary(fit.lm)$coefficients[5,1])^2)
+  skn5 <- c(skn5,(-1-summary(fit.lm)$coefficients[6,1])^2)
+  
+  fit.bayesx <- bayesx(y ~ x1+x2+x3+x4+x5, family = "gaussian", method = "MCMC")
+  b0bayes <- c(b0bayes,fit.bayesx$fixed.effects[1,1])
+  b1bayes <- c(b1bayes,fit.bayesx$fixed.effects[2,1])
+  b2bayes <- c(b2bayes,fit.bayesx$fixed.effects[3,1])
+  b3bayes <- c(b3bayes,fit.bayesx$fixed.effects[4,1])
+  b4bayes <- c(b4bayes,fit.bayesx$fixed.effects[5,1])
+  b5bayes <- c(b5bayes,fit.bayesx$fixed.effects[6,1])
+  odklon0 <- c(odklon0,fit.bayesx$fixed.effects[1,2])
+  odklon1 <- c(odklon1,fit.bayesx$fixed.effects[2,2])
+  odklon2 <- c(odklon2,fit.bayesx$fixed.effects[3,2])
+  odklon3 <- c(odklon3,fit.bayesx$fixed.effects[4,2])
+  odklon4 <- c(odklon4,fit.bayesx$fixed.effects[5,2])
+  odklon5 <- c(odklon5,fit.bayesx$fixed.effects[6,2])
+  skn0b <- c(skn0b,(20-fit.bayesx$fixed.effects[1,1])^2)
+  skn1b <- c(skn1b,(4-fit.bayesx$fixed.effects[2,1])^2)
+  skn2b <- c(skn2b,(10-fit.bayesx$fixed.effects[3,1])^2)
+  skn3b <- c(skn3b,(-0.2-fit.bayesx$fixed.effects[4,1])^2)
+  skn4b <- c(skn4b,(0-fit.bayesx$fixed.effects[5,1])^2)
+  skn5b <- c(skn5b,(-1-fit.bayesx$fixed.effects[6,1])^2)
+}
+M <- matrix(0,nrow=6,ncol=6)
+M[1,1] <- mean(b0lm)
+M[2,1] <- mean(b1lm)
+M[3,1] <- mean(b2lm)
+M[4,1] <- mean(b3lm)
+M[5,1] <- mean(b4lm)
+M[6,1] <- mean(b5lm)
+
+M[1,2] <- mean(sn0)
+M[2,2] <- mean(sn1)
+M[3,2] <- mean(sn2)
+M[4,2] <- mean(sn3)
+M[5,2] <- mean(sn4)
+M[6,2] <- mean(sn5)
+
+M[1,3] <- sqrt(mean(skn0))
+M[2,3] <- sqrt(mean(skn1))
+M[3,3] <- sqrt(mean(skn2))
+M[4,3] <- sqrt(mean(skn3))
+M[5,3] <- sqrt(mean(skn4))
+M[6,3] <- sqrt(mean(skn5))
+
+M[1,4] <- mean(b0bayes)
+M[2,4] <- mean(b1bayes)
+M[3,4] <- mean(b2bayes)
+M[4,4] <- mean(b3bayes)
+M[5,4] <- mean(b4bayes)
+M[6,4] <- mean(b5bayes)
+
+M[1,5] <-  mean(odklon0)
+M[2,5] <-  mean(odklon1)
+M[3,5] <-  mean(odklon2)
+M[4,5] <-  mean(odklon3)
+M[5,5] <-  mean(odklon4)
+M[6,5] <-  mean(odklon5)
+
+M[1,6] <- sqrt(mean(skn0b))
+M[2,6] <- sqrt(mean(skn1b))
+M[3,6] <- sqrt(mean(skn2b))
+M[4,6] <- sqrt(mean(skn3b))
+M[5,6] <- sqrt(mean(skn4b))
+M[6,6] <- sqrt(mean(skn5b))
+
+M
+}
+```
+
+Zaradi visoke časovne zahtevnosti sem naredil 1000 simulacij. Rezultate prikazuje spodnja matrika.
+
+```{r,eval=FALSE}
+Varianca50 <- NormalnaNapaka(1000,50)
+```
+
+```{r}
+source("sigma50")
+Varianca50
+```
+Hitro opazimo, da so rezultati zelo podobni v obeh pristopih. Regresijski koeficienti
+$\beta_1,\beta_2$ in $\beta3$ so zelo dobro ocenjeni, $\beta_5$ je ocenjen na približno $0$, je pa tudi statistično neznačilen kar sem preveril tudi posebej v izpisu rezltatov za zgolj en simulacijski scenarij. Majhna odstopanja pa vidimo pri $\beta_0$ ter $\beta_4$, kjer se ocenjena rahlo razlikujeta od pravih vrednosti. Menim, da se je to zgodilo, ker imata ta dva koeficienta manjši vpliv na vrednost
+$Y$ in je zato težje oceniti njuno točno vrednost. Čeprav je $\beta_3$ po absolutni vrednosti najmanjši, je vseeno bolje ocenjen, ker imajo pojasnevalne spremenljivke $X_3$ večje vrednosti. Z večanjem števila simulacij bi se po mojem mnenju tudi ta dva netočno ocenjena koeficienta približala pravi vrednosti. Sklepam, da je torej v obeh pristopih cenilka regresijskih koeficientov nepristranska.
+
+Srednja kvadratna napaka za cenilko $\text{Var}(\hat{\beta})$ je definirana kot
+$$ q(\hat{\beta}):=E((\hat{\beta}-\beta)^2).$$
+Zanjo velja $$ q(\hat{\beta})=\text{Var}(\hat{\beta})+E((E(\hat{\beta})-\beta)^2).$$
+Če je $\hat{\beta}$ nepristranska cenilka za $\beta$, je desna stran enaka $\text{Var}(\hat{\beta})$. Ujemanje korena srednje kvadratne in standardnega odklona torej nakazuje na nepristranskost cenilke. V našem konkretnem primeru vidimo, da sta si ti dve vrednosti pri obeh pristopih vedno zelo podobni, razen pri koeificientu $\beta_5$, ki pa je tako ali tako statistično neznačilen. Pristranskost obeh pristopov je torej zanemarljiva.
+
+Standardni odkloni so v obeh pristopih zelo podobni. Opazimo pa, da so v bayesovem pristopu vedno malenkost večji. Sklepam, da do tega pride zaradi vključevanja apriorne informacije pri bayesovi metodi. Pri klicanju funkcije bayesx smo predpostavili normalno apriorno porazdelitev regresijskih koeficientov. V prvi domači nalogi smo že videli, da lahko taka informacija povzroči večjo varianco aposteriorne porazdelitve.
+
+Razvidno je tudi, da so standarni odkloni zelo veliki pri spremenljivkah, ki imajo majhen efekt na $Y$. To je posledica visoke variance napake. Ta je imela velik vpliv na vrednosti $Y$, še posebej v primerjavi s spremenljivkama $X_5$, $X_4$ in začetno vrednostjo. To je povzročilo širok interval zaupanje za te vrednosti v modelu.
+
+## Normalno porazdeljena napako z majhno varianco
+
+V tem scenariju sem si izbral varianco velikosti $2$. Ponovno sem preveril ustreznost privzetih parametrov v funkciji bayesx, ki so tudi v tem primeru bili dovolj dobri, da jih ni bilo potrebno spreminjati. Izvedel sem 1000 simulacij. Pričakoval sem, da bodo ocene regresijskih koeficientov zaradi manjše variabilnosti napake bolj natančne.
+
+```{r,eval=FALSE}
+Varianca2 <- NormalnaNapaka(1000,2)
+```
+
+```{r}
+source("sigma2")
+Varianca2
+```
+
+Rezultati so skladni s pričakovanji. Tako v frekventističnem kot bayesovem pristopu so vsi regresijski koeficienti zelo dobro ocenjeni. Najbolje ocenjen je spet koeficient $\beta_2$, ki ima v modelu največji efekt. Pristranskosti cenilk torej ni. To nakazuje tudi zelo dobro ujemanje standardnih odklonov in korenov srednjih kvadratnih napak.
+
+Standardni odkloni so zaradi majhne variance napake majhni. Ponovno pa so v Bayesovem pristopu zaradi vključevanja apriorne informacije malenkost večji.
+
+## Asimetrično porazdeljena napaka
+
+V normalnem linearnem regresijskem modelu predpostavljamo, da je napaka porazdeljena normalno s pričakovano vrednostjo 0. To je ključna predpostavka, če želimo, da model vrne pravilne in smiselne rezultate. V tem razdelku sem testiral, kakšne so posledice, če ta predpostavka ne drži. Za porazdelitev napake sem si izbral hi-kvadrat porazdelitev s 30 prostostnimi stopnjami. Gostota te porazdelitve je asimetrična in pozitivna le za $x>0$. Spodnji histogram prikazuje rezultat vzorčenja 10000 slučajnih spremenljivk s to porazdelitvijo.
+
+```{r}
+primer <- rchisq(10000,30)
+hist(primer,prob=T,main="Vzorčenje 10000 primerov",xlab="")
+lines(density(primer),col="red",lwd=2)
+```
+
+Vidimo, da so vrednosti večinoma zgoščene med 20 in 40.
+
+Tudi tukaj sem najprej na eni simulaciji stestiral ustreznost privzetih parametrov funkcije bayesx, ki so se spet izkazali za ustrezne. 
+
+Funkcijo NormalnaNapaka sem modificiral v funkcijo HiKvadratNapaka, ki deluje enako kot prva, le da je napaka porazdeljena hi-kvadrat s 30 prostotstnimi stopnjami. Edina sprememba v kodi je bila napravljena v naslednji vrstici:
+```{r, eval=FALSE}
+y <- 20+4*x1+10*x2-0.2*x3-x4+rchisq(n,30)
+```
+Nato sem izvedel 1000 simulacij regresije. Rezultate prikazuje spodnja matrika.
+
+```{r, eval=FALSE}
+HiKvadrat30 <- HiKvadratNapaka(1000)
+```
+
+```{r}
+source("hikv30")
+HiKvadrat30
+```
+
+Takoj opazimo, da so rezultati drugačni kot v prejšnjih dveh primerih. Regresijski koeficient $\beta_0$ je popolnoma narobe ocenjen. Njegova prava vrednost je 20, oba pristopa pa sta ga ocenila na približno 50. Razlika med njima je 30, kar ravno ustreza številom prostostnih stopenj. Vemo, da za slučajno spremenljivko hi-kvadrat s $k$ prostostnimi stopnjami velja
+$$ E(\chi_k^2)=k,$$
+oba modela v simulaciji pa predpostavljata, da je ta pričakovana vrednost enaka 0. Iz tega sklepam, da sta modela te odvečne vrednosti velikosti 30, ki jih da napaka, razumela kot vrednosti regresijske konstante. To je povzročilo povečanje ocene $\beta_0$ za 30 in posledično močno pristranskost.
+
+Kljub vsemu temu, pa so ocene za ostale regresijske koeficiente ostale zelo dobre in so celo boljše kot v primeru z normalno porazdeljeno napako z varianco 50. V obeh pristopih so cenilke nepristranske. Ocene se s pravimi vrednostmi ujemajo na več decimalk natančno. Standardni odkloni in koreni srednjih kvadratnih napak so tudi skoraj enaki. Odkloni so večji kot prvi primeru z varianco 2, a manjši kot v primeru z varianco 50.
+
+Bayesov pristop da tudi tokrat v povprečju rahlo večje standardne odklonu kot frekventistični pristop.
+
+Neizpolnjena predpostavka o napaki v splošnem torej ni povzročila hudih napak v rezultatih. Čeprav je začetna vrednost narobe ocenjena, lahko z odštevanjem prostostnih stopenj napake vseeno dobimo dovolj dobro oceno za njeno pravo vrednost.
+
+## Povzetek
+
+V vseh treh primerih smo videli, da razlik med frekvenstičnim in bayesovim pristopom skorajda ni bilo. Za vsak regresijski koeficient so bile ocenjevane vrednosti zelo podobne. Pristranskost je vedno veljala bodisi pri obeh, bodisi pri nobenem. Edina opazna razlika se je videla v standardnih odklonih, ki so bili zaradi vključevanja apriorne informacije večji pri bayesovem pristopu.
