@@ -274,3 +274,175 @@ Neizpolnjena predpostavka o napaki v splošnem torej ni povzročila hudih napak 
 ## Povzetek
 
 V vseh treh primerih smo videli, da razlik med frekvenstičnim in bayesovim pristopom skorajda ni bilo. Za vsak regresijski koeficient so bile ocenjevane vrednosti zelo podobne. Pristranskost je vedno veljala bodisi pri obeh, bodisi pri nobenem. Edina opazna razlika se je videla v standardnih odklonih, ki so bili zaradi vključevanja apriorne informacije večji pri bayesovem pristopu.
+
+# Naloga 2
+
+## Podatki
+
+Podatke za linearno regresijo sem našel na spletni strani kaggle, ki hrani mnogo različnih baz podatkov. Našel sem podatke o študiju pričakovane življenjske dobe, ki ga je sestavila organizacija WHO. V tabeli so podatki za vse države sveta med leti 2000 in 2015. Imela je 22 stolpcev. Uvozil sem jo v R in malo preuredil. Ohranil sem le tiste stolpce, ki so se mi zdeli zanimivi za analizo. Poleg tega za nekatere države ni bilo dovolj podatkov, zato sem v tabeli izpustil vse vrstice, kjer kakšna vrednost manjka. Končna tabela je imela naslednje stolpce:
+* država
+* leto
+* pricakovanadoba: Pričakovana življenjska doba
+* smrtnost: Število smrti ljudi, starih med 15 in 60 let, na 1000 ljudi
+* ITM: Povprečen indeks telesne mase
+* BDP: BDP na prebivalca
+* solanje: Število let šolanja
+* status: Status države (razvita, v procesu razvoja). Stolpec vsebuje le vrednosti "Developed" in "Developing", ki sem ju nato zamenjal z vrednostima 1 in 0.
+
+
+## Linearna regresija
+
+V tem razdelku sem opustil stolpca država in leto, saj sta ta bila pomembna le pri
+hierarhičnih modelih. Spremenljivko pricakovanadoba sem regresiral na ostale spremenljivke. Zanimalo me je kako močen efekt imajo spremembe teh spremenljivk na pričakovano življensko dobo, oziroma, če ga sploh imajo. Simuliral sem dva primera. V prvem sem naredil regresijo na vse spremenljivke, v drugem pa le na dve. Ker so pojasnevalne spremenljivke med sabo lahko odvisne, me je zanimalo, če bodo ocenjeni
+regresijski koeficienti različni glede na vključitev določenih spremenljivk.
+
+```{r}
+library(readr)
+library(dplyr)
+library(tidyr)
+library(coda)
+library(nimble)
+library(basicMCMCplots)
+
+tabela <- read_csv("Life Expectancy Data.csv") %>%
+  select("Country","Year", "Life expectancy", "Adult Mortality",
+         "BMI", "GDP", "Schooling", "Status") %>%
+  rename(drzava=Country, leto=Year, pricakovanadoba="Life expectancy",
+         smrtnost="Adult Mortality", ITM=BMI,BDP=GDP,solanje=Schooling,
+         status=Status) %>%
+  drop_na()
+tabela$status <- ifelse(tabela$status=="Developed",1,0)
+```
+
+### Regresija na vse spremenljivke
+
+Najprej sem torej naredil regresijo na vseh 5 pojasnevalnih spremenljivk. Te so:
+* $X_1$: BDP
+* $X_2$: ITM
+* $X_3$: Šolanje
+* $X_4$: Smrtnost
+* $X_5$: Status
+Na nekaj primerih sem stestiral ustrezno število iteracij in burn-in. Izkazalo se je, da dobimo za 12000 iteracij in 2000 burn-ina zadovoljive rezultate.
+```{r,eval=FALSE}
+code <- nimbleCode({
+  beta0 ~ dnorm(0, sd = 100)
+  for(k in 1:p) {
+    beta[k] ~ dnorm(0, sd = 100)
+  }
+  sigma ~ dunif(0, 100)
+  for(i in 1:n) {
+    y[i] ~ dnorm(beta0 + inprod(beta[1:p], x[i, 1:p]), sd = sigma)
+  }
+})
+
+X <- subset(tabela, select = c("BDP","ITM","solanje","smrtnost","status"))
+p <- ncol(X)
+
+constants <- list(n = length(tabela$pricakovanadoba),
+                  p = p,
+                  x = X)
+
+data <- list(y = tabela$pricakovanadoba)
+
+inits <- list(beta0 = mean(tabela$pricakovanadoba),
+              beta = rep(0, p),
+              sigma = 1)
+
+Rmodel <- nimbleModel(code, constants, data, inits)
+
+conf <- configureMCMC(Rmodel)
+
+Rmcmc <- buildMCMC(conf)
+Cmodel <- compileNimble(Rmodel)
+
+Cmcmc <- compileNimble(Rmcmc, project=Cmodel)
+
+samples <- runMCMC(Cmcmc, niter=12000,nburnin = 2000)
+```
+
+```{r,echo=FALSE}
+source("s1")
+```
+
+```{r}
+samplesPlot(samples,var="beta[1]")
+```
+
+```{r}
+samplesPlot(samples,var="beta[2]")
+```
+
+```{r}
+samplesPlot(samples,var="beta[3]")
+```
+
+```{r}
+samplesPlot(samples,var="beta[4]")
+```
+
+```{r}
+samplesPlot(samples,var="beta[5]")
+```
+
+```{r}
+samplesSummary(samples)
+```
+
+Iz tabele lahko razberemo ocenjene vrednosti regresijskih koeficientov in kredibilnostne intervale ter jih interpretiramo:
+
+$\beta_1=0.000055$: Če se BDP na prebivalca poveča za 1 ameriški dolar, se v povprečju pričakovana življenska doba poveča za 0.000055 leta (približno pol ure). 95% kredibilnostni interval v celoti leži na pozitivni osi, vendar sta krajišči zelo majhni. BDP na prebivalca ima torej sicer majhen učinek na pričakovano življensko dobo. A vedeti moramo, da tu opazujemo le spremembo za 1 ameriški dolar. V praksi so lahko te spremembe velike. Z večjim BDP-jem lahko država več vlaga v razvoj medicine in se to lahko kasneje začne poznati na daljši življenski dobi.
+
+$\beta_2=0.06934$: Če se povprečen indeks telesne mase poveča za 1, se v povprečju pričakovana življenska doba poveča za 0.06934 leta. Ta spremenljivka je lahko problematična za uporabo v linearni regresiji, saj ni očitno kakšen predznak bi moral imeti koeficient. Tako previsok kot prenizek ITM ima namreč negativen vpliv na zdravje, zato bi pričakoval, da bi bila odvisnost med spremenljivkama morda kvadratna. Kljub temu pa naši podatki kažejo na rahlo pozitivno linearno odvisnost med spremenljivkama.
+
+$\beta_3=1.24$: Če se doba šolanja v državi poveča za 1 leto, se v povprečju pričakovana življenska doba poveča za 1.24 leta. Kredibilnostni interval tu leži med 1.15 in 1.33. Pričakovano je odnos med spremenljivkama pozitiven. Če se v neki državi ljudje dlje šolajo, so bolj izobraženi in je s tem posledično tam bolj razvita tudi medicina. 
+
+$\beta_4=-0.03026$: Če se smrtnost ljudi starih med 15 in 60 let poveča za 0.1 odstotne točke, se v povprečju pričakovana življenska doba zmanjša za 0.03026 leta. S 95% verjetnostjo pa se pričakovana življenska doba zmanjša za več kot 0.0285 in manj kot 0.0321 let. Koeficient je pričakovano negativno predznačen. Smrtnost negativno vpliva na pričakovano življensko dobo.
+
+$\beta_5=1.4$: V razvitih državah je pričakovana življenska doba v povprečju za 1.4 leta višja kot v nerazvitih državah. Spremenljivka je očitno statistično značilna. Koeficient pa pa med vsemi najširši kredibilnostni interval. Ta se nahaja med 0.73 in 2.06.
+
+Pogledamo si lahko še primer, ko generiramo več verig z naključnimi začetnimi vrednostmi.
+
+```{r, eval=FALSE}
+
+initsFunction <- function(){
+  list(beta0 = rnorm(1),
+       beta = rnorm(5),
+       sigma = runif(1, min = 0, max = 10))
+}
+
+samplesList <- runMCMC(Cmcmc, niter = 12000, nburnin = 0,
+                       nchains = 3, inits = initsFunction)
+```
+
+```{r}
+source("verige1")
+chainsPlot(samplesList, burnin=2000)
+```
+
+Vidimo, da so si pri vseh regresijskih koeficientih razen pri $\beta_3$, aposteriorne gostote zelo podobne. V spodnji tabeli vidimo tudi da $\beta_3$ povzroča hude probleme koreliranosti koeficientov. Ta je sicer prisotna pri vseh koeficientih. 
+
+```{r}
+cor(samples)
+```
+
+Zaradi tega so tudi efektivne velikosti vzorca zelo majhne.
+```{r}
+effectiveSize(samples)
+```
+
+Problem sem rešil s centriranjem spremenljivk.
+
+```{r,eval=FALSE}
+X.centr = apply(X, 2, function(y) y - mean(y))
+
+constants.centr <- list(n = length(tabela$pricakovanadoba),
+                        p = p,
+                        x = X.centr)
+
+Rmodel.centr <- nimbleModel(code, constants.centr, data, inits)
+conf.centr <- configureMCMC(Rmodel.centr)
+Rmcmc.centr <- buildMCMC(conf.centr)
+Cmodel.centr <- compileNimble(Rmodel.centr)
+Cmcmc.centr <- compileNimble(Rmcmc.centr, project = Cmodel.centr)
+samples.centr <- runMCMC(Cmcmc.centr, niter = 12000, nburnin = 2000)
+```
