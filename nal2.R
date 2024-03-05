@@ -13,6 +13,13 @@ tabela <- read_csv("Life Expectancy Data.csv") %>%
          status=Status) %>%
   drop_na()
 tabela$status <- ifelse(tabela$status=="Developed",1,0)
+ind <- c(1)
+s <- 1
+for (i in 2:length(tabela$drzava)) {
+  if (tabela$drzava[i]!=tabela$drzava[i-1]) { s <-s+1 }
+  ind <- c(ind,s)
+}
+tabela$indeks <- ind
 View(tabela)
 
 code <- nimbleCode({
@@ -49,7 +56,7 @@ Cmodel <- compileNimble(Rmodel)
 Cmcmc <- compileNimble(Rmcmc, project=Cmodel)
 
 samples <- runMCMC(Cmcmc, niter=12000,nburnin = 2000)
-dump(c("samples"),"s1")
+dump(c("samples","samples.centr"),"s1")
 samplesSummary(samples)
 
 samplesPlot(samples)
@@ -86,3 +93,86 @@ samplesList <- runMCMC(Cmcmc, niter = 12000, nburnin = 0,
                        nchains = 3, inits = initsFunction)
 chainsPlot(samplesList, burnin=2000)
 dump(c("samplesList"),"verige1")
+samplesList.centr <- runMCMC(Cmcmc.centr, niter = 12000, nburnin = 2000,
+                             nchains = 3, inits = initsFunction)
+chainsPlot(samplesList.centr, burnin=0)
+dump(c("samplesList.centr"),"verige2")
+
+
+tabela2 <- tabela %>%
+  group_by(indeks) %>%
+  summarise(povprecje=mean(pricakovanadoba),n=length(pricakovanadoba),
+            varianca=var(pricakovanadoba))
+
+m <- length(tabela2$indeks)
+n <- tabela2$n
+xMatrix <- matrix(NA, ncol=m,nrow=max(n))
+for (j in 1:m) {
+  xMatrix[1:n[j],j] <- tabela[tabela$indeks==j,]$solanje-mean(tabela[tabela$indeks==j,]$solanje)
+}
+yMatrix <- matrix(NA, ncol=m,nrow=max(n))
+for (j in 1:m) {
+  yMatrix[1:n[j],j] <- tabela[tabela$indeks==j,]$pricakovanadoba
+}
+
+
+code2 <- nimbleCode({
+  mu ~ dnorm(0,sd=100)
+  eta ~ dunif(0,100)
+  sigma ~ dunif(0,100)
+  beta ~ dnorm(0,sd=100)
+  etaBeta ~ dunif(0,100)
+  
+  for (j in 1:m) {
+    muGroups[j] ~ dnorm(mu, sd = eta)
+    betaGroups[j] ~ dnorm(beta, sd = etaBeta)
+    for (i in 1:n[j]) {
+      y[i, j] ~ dnorm(muGroups[j] + betaGroups[j] * x[i, j], sd = sigma);
+    }
+  }
+})
+
+constants2 <- list(m = m, n = n)
+
+inits2 <- list(mu=mean(tabela2$povprecje),
+               eta = sd(tabela2$povprecje),
+               sigma=mean(sqrt(tabela2$varianca)),
+               muGroups=tabela2$povprecje,
+               betaGroups=rep(0,m),
+               beta=0,
+               etaBeta=1)
+
+data2 <- list(y=yMatrix,x=xMatrix)
+
+Rmodel2 <- nimbleModel(code = code2, constants = constants2,
+                       inits = inits2, data = data2) 
+Rmodel2$initializeInfo()
+
+conf2 <- configureMCMC(Rmodel2)
+conf2$addMonitors('muGroups', 'betaGroups')   #dodamo shranjevanje mu_j in beta_j
+
+Rmcmc2 <- buildMCMC(conf2)
+Cmodel2 <- compileNimble(Rmodel2)
+Cmcmc2 <- compileNimble(Rmcmc2, project = Cmodel2)
+samples2 <- runMCMC(Cmcmc2, niter = 12000, nburnin = 2000)
+
+dump(c("samples2"),"hier")
+
+samplesSummary(samples2)[c(1, 103, 2, 104, 102, 105, 205),]
+samplesPlot(samples2, var = c("beta","betaGroups[1]"))
+samplesPlot(samples2, var = c("mu","muGroups[1]"))
+samplesPlot(samples2, var = c("etaBeta","eta","sigma"))
+
+initsFunction2 <- function(){
+  list(mu = rnorm(1, mean = mean(tabela2$povprecje), sd = 10),
+       eta = runif(1, min = 0, max = 10),
+       sigma = runif(1, min = 0, max = 10),
+       muGroups = rnorm(m, mean = tabela2$povprecje, sd = 10),
+       betaGroups = rnorm(m),                 
+       beta = rnorm(1),                       
+       etaBeta = runif(1, min = 0, max = 10)) 
+}
+
+samplesList2 <- runMCMC(Cmcmc2, niter = 12000, nburnin = 2000,
+                        nchains = 3, inits = initsFunction2)
+dump(c("samplesList2"),"hierverige")
