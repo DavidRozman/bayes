@@ -293,8 +293,7 @@ Podatke za linearno regresijo sem našel na spletni strani kaggle, ki hrani mnog
 ## Linearna regresija
 
 V tem razdelku sem opustil stolpca država in leto, saj sta ta bila pomembna le pri
-hierarhičnih modelih. Spremenljivko pricakovanadoba sem regresiral na ostale spremenljivke. Zanimalo me je kako močen efekt imajo spremembe teh spremenljivk na pričakovano življensko dobo, oziroma, če ga sploh imajo. Simuliral sem dva primera. V prvem sem naredil regresijo na vse spremenljivke, v drugem pa le na dve. Ker so pojasnevalne spremenljivke med sabo lahko odvisne, me je zanimalo, če bodo ocenjeni
-regresijski koeficienti različni glede na vključitev določenih spremenljivk.
+hierarhičnih modelih. Spremenljivko pricakovanadoba sem regresiral na ostale spremenljivke. Zanimalo me je kako močen efekt imajo spremembe teh spremenljivk na pričakovano življensko dobo, oziroma, če ga sploh imajo.
 
 ```{r}
 library(readr)
@@ -316,7 +315,7 @@ tabela$status <- ifelse(tabela$status=="Developed",1,0)
 
 ### Regresija na vse spremenljivke
 
-Najprej sem torej naredil regresijo na vseh 5 pojasnevalnih spremenljivk. Te so:
+Naredil sem regresijo na vseh 5 pojasnevalnih spremenljivk. Te so:
 * $X_1$: BDP
 * $X_2$: ITM
 * $X_3$: Šolanje
@@ -445,4 +444,191 @@ Rmcmc.centr <- buildMCMC(conf.centr)
 Cmodel.centr <- compileNimble(Rmodel.centr)
 Cmcmc.centr <- compileNimble(Rmcmc.centr, project = Cmodel.centr)
 samples.centr <- runMCMC(Cmcmc.centr, niter = 12000, nburnin = 2000)
+```
+
+```{r}
+samplesPlot(samples)
+samplesPlot(samples.centr)
+```
+Opazimo izboljšano konvergenco v primeru centriranja spremenljivk. Povečale so se efektivne velikosti vzorca, koreliranost med spremenljivkami pa se je zmanjšala.
+```{r}
+effectiveSize(samples.centr)
+cor(samples.centr)
+```
+Spodaj vidimo še primer s 3 verigami na centriranih spremenljivkah. Tudi tu je vidna izboljšana konvergenca.
+```{r,eval=FALSE}
+samplesList.centr <- runMCMC(Cmcmc.centr, niter = 12000, nburnin = 2000,
+                             nchains = 3, inits = initsFunction)
+```
+
+```{r,echo=FALSE}
+source("verige2")
+```
+
+```{r}
+chainsPlot(samplesList.centr, burnin=0)
+```
+
+## Hierarhični model
+
+Za hierarhični model sem si izbral regresijo oblike
+$$Y_{i,j}=\mu_j+\beta_j X_{i,j}+\varepsilon,$$
+
+kjer je $\mu_j\sim N(\mu,\eta^2)$ in $\beta_j\sim N(\beta,\eta_{\beta}^2).$ Pojasnevalna spremenljivka $X$ pa meri povprečno trajanje šolanja. Zanimalo me je, v katerih državah ima šolanje večji vpliv na pričakovano življensko in kje manjšega. Ker je v prejšnjem razdelku imel regresijski koeficient dokaj stran od 0, bo zato ta spremenljivka bolj zanimiva za analizo kot tiste, ki so bile blizu 0. Da bi se čim bolj izognil težavam s konvergenco sem model zagnal na centriranih spremenljivkah.
+
+```{r, eval=FALSE}
+tabela <- read_csv("Life Expectancy Data.csv") %>%
+  select("Country","Year", "Life expectancy", "Adult Mortality",
+         "BMI", "GDP", "Schooling", "Status") %>%
+  rename(drzava=Country, leto=Year, pricakovanadoba="Life expectancy",
+         smrtnost="Adult Mortality", ITM=BMI,BDP=GDP,solanje=Schooling,
+         status=Status) %>%
+  drop_na()
+tabela$status <- ifelse(tabela$status=="Developed",1,0)
+ind <- c(1)
+s <- 1
+for (i in 2:length(tabela$drzava)) {
+  if (tabela$drzava[i]!=tabela$drzava[i-1]) { s <-s+1 }
+  ind <- c(ind,s)
+}
+tabela$indeks <- ind
+```
+Tu sem v tabelo dodal stolpec indeks, ki vsako državo označi s svojim indeksom.
+```{r,eval=FALSE}
+tabela2 <- tabela %>%
+  group_by(indeks) %>%
+  summarise(povprecje=mean(pricakovanadoba),n=length(pricakovanadoba),
+            varianca=var(pricakovanadoba))
+
+m <- length(tabela2$indeks)
+n <- tabela2$n
+xMatrix <- matrix(NA, ncol=m,nrow=max(n))
+for (j in 1:m) {
+  xMatrix[1:n[j],j] <- tabela[tabela$indeks==j,]$solanje-mean(tabela[tabela$indeks==j,]$solanje)
+}
+yMatrix <- matrix(NA, ncol=m,nrow=max(n))
+for (j in 1:m) {
+  yMatrix[1:n[j],j] <- tabela[tabela$indeks==j,]$pricakovanadoba
+}
+
+code2 <- nimbleCode({
+  mu ~ dnorm(0,sd=100)
+  eta ~ dunif(0,100)
+  sigma ~ dunif(0,100)
+  beta ~ dnorm(0,sd=100)
+  etaBeta ~ dunif(0,100)
+  
+  for (j in 1:m) {
+    muGroups[j] ~ dnorm(mu, sd = eta)
+    betaGroups[j] ~ dnorm(beta, sd = etaBeta)
+    for (i in 1:n[j]) {
+      y[i, j] ~ dnorm(muGroups[j] + betaGroups[j] * x[i, j], sd = sigma);
+    }
+  }
+})
+
+constants2 <- list(m = m, n = n)
+
+inits2 <- list(mu=mean(tabela2$povprecje),
+               eta = sd(tabela2$povprecje),
+               sigma=mean(sqrt(tabela2$varianca)),
+               muGroups=tabela2$povprecje,
+               betaGroups=rep(0,m),
+               beta=0,
+               etaBeta=1)
+
+data2 <- list(y=yMatrix,x=xMatrix)
+
+Rmodel2 <- nimbleModel(code = code2, constants = constants2,
+                       inits = inits2, data = data2) 
+Rmodel2$initializeInfo()
+
+conf2 <- configureMCMC(Rmodel2)
+conf2$addMonitors('muGroups', 'betaGroups')
+
+Rmcmc2 <- buildMCMC(conf2)
+Cmodel2 <- compileNimble(Rmodel2)
+Cmcmc2 <- compileNimble(Rmcmc2, project = Cmodel2)
+samples2 <- runMCMC(Cmcmc2, niter = 12000, nburnin = 2000)
+```
+
+```{r,echo=FALSE}
+source("hier")
+```
+
+Poglejmo si na primer oceni koeficientov za Slovenijo v primerjavi z ocenama hiperparametrov in ju interpretirajmo.
+```{r}
+samplesPlot(samples2, var=c("beta","betaGroups[129]"))
+```
+
+V Sloveniji ima sprememba trajanja šolanja nadpovprečen vpliv na pričakovano življensko dobo.
+
+```{r}
+samplesPlot(samples2, var=c("mu","muGroups[129]"))
+```
+
+Če je trajanje šolanja enako 0 v vseh državah, je pričakovana življenska doba v Sloveniji nadpovprečna glede na vse države sveta. Treba je sicer opomniti, da začetna vrednost zaradi centriranja podatkov ni točno ocenjena.
+
+Poglejmo še v katerih državah so koeficienti $\beta_j$ najvišji in najnižji.
+
+```{r}
+drzave <- tabela$drzava[!duplicated(tabela$drzava, fromLast=TRUE)]
+bete <- samplesSummary(samples2)[c(2:156),1]
+tabela.bete <- data.frame(drzave,bete)[order(bete),]
+head(tabela.bete)
+tail(tabela.bete)
+```
+
+Rezultati so dokaj presenetljivi. Pričakoval sem, da bo imel koeficient $\beta$ največjo vrednost pri nizko razvitih državah, saj bi tam lahko že rahlo izboljšanje izobraževalnega sistema močno izboljšalo znanje medicine, medtem ko je v razvitih državah medicina že tako dobra, da dodatno šolanje ne bi prineslo revolucionarnih posledic. V končni tabeli pa je težko zaznati nek vzorec. Tako na vrhu kot na dnu vidimo razvite (Nemčija, Belgija) in nerazvite države (Zambia, Namibija). Pri nekaterih je koeficient celo negativno predznačen. Za to bi lahko bili krivi slabi podatki, oziroma da jih je bilo premalo, da bi iz njih bil jasen vpliv.
+
+Pogledamo si lahko še aposteriorne gostote varianc.
+```{r}
+samplesPlot(samples2, var = c("etaBeta","eta","sigma"))
+```
+
+## Konvergenca
+```{r}
+head(sort(effectiveSize(samples2)))
+head(sort(abs(cor(samples2)[cor(samples2)!=1]), decreasing = T))
+```
+
+Prihaja do nekaj korelacije med spremenljivkami. Najmanjša efektivna velikosti je približno 1006, kar ni najboljše, a lahko bi bilo precej slabše.
+
+Poglejmo si še primer z generiranjem več verig.
+
+```{r,eval=FALSE}
+initsFunction2 <- function(){
+  list(mu = rnorm(1, mean = mean(tabela2$povprecje), sd = 10),
+       eta = runif(1, min = 0, max = 10),
+       sigma = runif(1, min = 0, max = 10),
+       muGroups = rnorm(m, mean = tabela2$povprecje, sd = 10),
+       betaGroups = rnorm(m),                 
+       beta = rnorm(1),                       
+       etaBeta = runif(1, min = 0, max = 10)) 
+}
+
+samplesList2 <- runMCMC(Cmcmc2, niter = 12000, nburnin = 2000,
+                      nchains = 3, inits = initsFunction2)
+
+```
+
+Spet si oglejmo grafe za hiperparametre, varianco in Slovenijo.
+```{r,echo=FALSE}
+source("hierverige")
+```
+
+```{r}
+chainsPlot(samplesList2, var = c("mu", "muGroups[129]", "eta", "sigma",
+                                 "beta", "betaGroups[129]", "etaBeta"))
+```
+
+Konvergenca je zadovoljiva. Rahla odstopanja vidimo pri eta, sigma, in etaBeta.
+
+```{r}
+chainsSummary(samplesList2, buffer.left = 1, buffer.right = 1, scale = FALSE,
+              var = c("mu", "muGroups[1]", "eta", "sigma",
+                      "beta", "betaGroups[1]", "etaBeta"))
+chainsSummary(samplesList2, buffer.left = 1, buffer.right = 1, scale = TRUE,
+              var = c("mu", "muGroups[1]", "eta", "sigma",
+                      "beta", "betaGroups[1]", "etaBeta"))
 ```
